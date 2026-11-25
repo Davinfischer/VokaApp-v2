@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#1d2b53">
+<title>VokabelFoto</title>
+<style>
+:root{--bg:#f3f6fb;--card:#fff;--ink:#1d2b53;--mute:#68739a;--line:#d9e0ef;--hl:#ffe14d;--ok:#2f9e6f;--bad:#d6336c;--r:14px}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1426;--card:#17203b;--ink:#e8ecf8;--mute:#929cc0;--line:#2a3558;--hl:#ffe14d}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 "Avenir Next","Segoe UI",system-ui,sans-serif;padding-bottom:80px}
+main{max-width:640px;margin:0 auto;padding:16px}
+h1{font:700 1.5rem Georgia,serif;margin:8px 0 16px}
+h1 span{background:var(--hl);color:#1d2b53;padding:0 6px;border-radius:4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+button,select,input{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 14px;cursor:pointer}
+button.p{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:600}
+button.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
+button.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--hl);outline-offset:2px}
+input,select{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:9px 11px;width:100%}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row>*{flex:1}
+.mute{color:var(--mute);font-size:.9rem}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:center;gap:6px;padding:8px}
+nav button{flex:1;max-width:200px;border:0;background:none;font-weight:600;color:var(--mute)}
+nav button.on{color:var(--ink);box-shadow:inset 0 -3px var(--hl)}
+.drop{display:block;border:2px dashed var(--line);border-radius:var(--r);padding:28px 12px;text-align:center;cursor:pointer;font-weight:600}
+.drop input{display:none}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:10px}
+.bar i{display:block;height:100%;background:var(--ok);width:0;transition:width .2s}
+.pair{display:flex;gap:6px;margin-bottom:6px}
+.pair button{flex:0 0 auto;padding:6px 10px}
+.big{font:700 1.9rem/1.2 Georgia,serif;text-align:center;padding:36px 8px;min-height:130px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;cursor:pointer}
+.opt{display:block;width:100%;text-align:left;margin-bottom:8px}
+.opt.right{background:var(--ok);color:#fff}.opt.wrong{background:var(--bad);color:#fff}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid button{min-height:52px}
+.grid .sel{outline:3px solid var(--hl)}.grid .done{opacity:.25;pointer-events:none}.grid .flash{background:var(--bad);color:#fff}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modes button{padding:18px 8px;font-weight:600}
+.item{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.box{font-size:.8rem;color:var(--mute);white-space:nowrap}
+.fb{margin:10px 0;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>Vokabel<span>Foto</span> <small style="font:400 .75rem sans-serif;color:var(--mute)">Version 3</small></h1>
+<div id="err" style="display:none;background:#d6336c;color:#fff;padding:10px;border-radius:10px;margin-bottom:12px"></div>
+<div id="app"></div>
+</main>
+<nav id="nav"></nav>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+window.onerror=(m,u,l)=>{const e=document.getElementById("err");e.style.display="block";e.textContent="Fehler: "+m+" (Zeile "+l+")"};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const LANGS={eng:['Englisch','en-US'],fra:['Französisch','fr-FR'],spa:['Spanisch','es-ES'],ita:['Italienisch','it-IT'],lat:['Latein','la']};
+const BOOKS=['Green Line 1','Green Line 2','Green Line 3','Green Line 4','Green Line 5','Green Line 6','Green Line Oberstufe','Green Line Transition'];
+const def=()=>({words:[],lang:'eng',dir:'f2d',book:'Green Line 1',page:'',fb:'',ff:'',ft:''});
+const pr=t=>{const m=String(t).match(/\d+/g);return m?[+m[0],+m[m.length-1]]:[0,0]};
+let S;try{S=Object.assign(def(),JSON.parse(localStorage.getItem('vf'))||{})}catch(e){S=def()}
+const save=()=>{try{localStorage.setItem('vf',JSON.stringify(S))}catch(e){}};
+let view='scan',draft=[],prog=null,L=null;
+const shuf=a=>[...a].sort(()=>Math.random()-.5);
+const norm=s=>s.toLowerCase().replace(/[.!?]/g,'').replace(/\s+/g,' ').trim();
+const Q=w=>S.dir==='f2d'?w.f:w.d, A=w=>S.dir==='f2d'?w.d:w.f;
+const speak=t=>{try{const u=new SpeechSynthesisUtterance(t);u.lang=LANGS[S.lang][1];speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}};
+
+/* ---------- Navigation ---------- */
+function nav(){
+  $('#nav').innerHTML=[['scan','Foto'],['list','Wörter ('+S.words.length+')'],['learn','Lernen']]
+    .map(([k,t])=>`<button class="${view===k?'on':''}" onclick="go('${k}')">${t}</button>`).join('');
+}
+function go(v){view=v;L=null;render()}
+function render(){nav();$('#app').innerHTML=({scan:vScan,list:vList,learn:vLearn})[view]()}
+
+/* ---------- Foto & Texterkennung ---------- */
+function vScan(){
+  const langs=Object.entries(LANGS).map(([k,v])=>`<option value="${k}" ${S.lang===k?'selected':''}>${v[0]}</option>`).join('');
+  let h=`<div class="card"><label class="mute">Fremdsprache deiner Liste</label>
+  <select onchange="S.lang=this.value;save()">${langs}</select><br><br>
+  <div class="row"><div><label class="mute">Buch</label><input list="bk" value="${esc(S.book)}" oninput="S.book=this.value;save()"><datalist id="bk">${BOOKS.map(b=>`<option value="${b}">`).join('')}</datalist></div>
+  <div><label class="mute">Seite(n) auf dem Foto</label><input value="${esc(S.page)}" placeholder="z. B. 34 oder 34-35" oninput="S.page=this.value;save()"></div></div><br>
+  <label class="drop">Vokabelliste fotografieren oder Bild wählen
+  <input type="file" accept="image/*" onchange="ocr(this.files[0])"></label>
+  <p class="mute">Am besten das Vokabelverzeichnis im Buch fotografieren, eine Seite pro Foto. Lautschrift in [ ] wird ignoriert. Tipp: gerade von oben, gutes Licht. Pro Zeile ein Paar, z. B. <i>apple – Apfel</i>.</p>
+  ${prog!==null?`<div class="mute" id="pt">Erkenne Text …</div><div class="bar"><i id="pb" style="width:${prog}%"></i></div>`:''}</div>`;
+  if(draft.length||prog===0){
+    h+=`<div class="card"><b>Prüfen und korrigieren</b><p class="mute">${LANGS[S.lang][0]} links, Deutsch rechts.</p>`+
+    draft.map((p,i)=>`<div class="pair"><input value="${esc(p[0])}" oninput="draft[${i}][0]=this.value"><input value="${esc(p[1])}" oninput="draft[${i}][1]=this.value"><button onclick="draft.splice(${i},1);render()" aria-label="Zeile löschen">✕</button></div>`).join('')+
+    `<div class="row"><button onclick="draft.push(['','']);render()">+ Zeile</button><button class="p" onclick="adopt()">Übernehmen</button></div></div>`;
+  }else if(prog===null){
+    h+=`<div class="card"><button onclick="draft=[['','']];render()">Wörter von Hand eingeben</button></div>`;
+  }
+  return h;
+}
+function prep(file){
+  return new Promise((res,rej)=>{
+    const img=new Image();img.onload=()=>{
+      const m=Math.min(1,2000/Math.max(img.width,img.height)),c=document.createElement('canvas');
+      c.width=img.width*m;c.height=img.height*m;
+      const x=c.getContext('2d');x.filter='grayscale(1) contrast(1.4)';x.drawImage(img,0,0,c.width,c.height);res(c)};
+    img.onerror=rej;img.src=URL.createObjectURL(file);
+  });
+}
+async function ocr(file){
+  if(!file)return;
+  if(typeof Tesseract==='undefined'){alert('Texterkennung konnte nicht geladen werden. Bitte Internetverbindung prüfen.');return}
+  prog=0;draft=[];render();
+  try{
+    const c=await prep(file);
+    const r=await Tesseract.recognize(c,S.lang+'+deu',{logger:m=>{
+      if(m.status==='recognizing text'){prog=Math.round(m.progress*100);const b=$('#pb');if(b)b.style.width=prog+'%'}}});
+    draft=parse(r.data.text);
+  }catch(e){alert('Das Foto konnte nicht gelesen werden. Versuche ein schärferes Bild.')}
+  prog=null;if(!draft.length)draft=[['','']];render();
+}
+function parse(t){
+  const out=[];
+  for(const raw of t.split('\n')){
+    const l=raw.replace(/\[[^\]]*\]/g,' ').replace(/[|_]/g,' ').replace(/^\W*\d+[.)]?\s+(?=[A-Za-zÄÖÜäöü])/,'').trim();if(l.length<3)continue;
+    const p=l.split(/\s+[-–—:=]+\s+|\t|\s{3,}|\s*[:=]\s*/).map(s=>s.trim()).filter(Boolean);
+    if(p.length>=2)out.push([p[0],p.slice(1).join(' ')]);
+  }
+  return out;
+}
+function adopt(){
+  const [p1,p2]=pr(S.page);const ex=new Set(S.words.map(w=>norm(w.f)+'|'+norm(w.d)));let n=0;
+  for(const [f,d] of draft){
+    if(!f.trim()||!d.trim()||ex.has(norm(f)+'|'+norm(d)))continue;
+    S.words.push({id:Date.now()+n++,f:f.trim(),d:d.trim(),box:1,b:S.book.trim(),p:p1,pe:p2});
+  }
+  save();draft=[];view='list';render();
+}
+
+/* ---------- Wortliste ---------- */
+function vList(){
+  if(!S.words.length)return `<div class="card">Noch keine Wörter. Mach ein Foto deiner Liste.</div>`;
+  return `<div class="card">`+S.words.map(w=>`<div class="item"><div><b>${esc(w.f)}</b><br><span class="mute">${esc(w.d)}</span><br><span class="box">${esc(w.b||'Ohne Buch')}${w.p?', S. '+w.p+(w.pe&&w.pe!==w.p?'–'+w.pe:''):''}</span></div>
+  <div class="row" style="flex:0"><span class="box">Fach ${w.box}/5</span><button onclick="speak('${esc(w.f).replace(/'/g,"\\'")}')" aria-label="Vorlesen">🔊</button><button onclick="del(${w.id})" aria-label="Löschen">✕</button></div></div>`).join('')+`</div>
+  <div class="row"><button onclick="exp()">Sichern (JSON)</button><label class="drop" style="padding:10px;border-style:solid">Laden<input type="file" accept=".json" onchange="imp(this.files[0])"></label></div>`;
+}
+function del(id){S.words=S.words.filter(w=>w.id!==id);save();render()}
+function exp(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));a.download='vokabeln.json';a.click()}
+function imp(f){if(!f)return;f.text().then(t=>{try{const d=JSON.parse(t);if(Array.isArray(d.words)){S=Object.assign(def(),d);save();render()}}catch(e){alert('Datei ungültig.')}})}
+
+/* ---------- Lernen ---------- */
+function vLearn(){
+  if(!L){
+    const bks=[...new Set(S.words.map(w=>w.b).filter(Boolean))],n=pool().length;
+    const f=`<div class="card"><label class="mute">Buch</label>
+    <select onchange="S.fb=this.value;save();render()"><option value="">Alle Bücher</option>${bks.map(b=>`<option ${S.fb===b?'selected':''}>${esc(b)}</option>`).join('')}</select><br><br>
+    <div class="row"><div><label class="mute">Von Seite</label><input type="number" min="1" value="${esc(S.ff)}" onchange="S.ff=this.value;save();render()"></div>
+    <div><label class="mute">Bis Seite</label><input type="number" min="1" value="${esc(S.ft)}" onchange="S.ft=this.value;save();render()"></div></div>
+    <p class="mute">${n} Wörter ausgewählt</p>
+    <label class="mute">Abfragerichtung</label>
+    <select onchange="S.dir=this.value;save()"><option value="f2d" ${S.dir==='f2d'?'selected':''}>${LANGS[S.lang][0]} → Deutsch</option><option value="d2f" ${S.dir==='d2f'?'selected':''}>Deutsch → ${LANGS[S.lang][0]}</option></select></div>`;
+    if(n<2)return f+`<div class="card">Für diese Auswahl gibt es zu wenige Wörter. Fotografiere die Seiten oder erweitere den Seitenbereich.</div>`;
+    return f+`<div class="modes"><button onclick="start('card')">🃏 Karteikarten</button><button onclick="start('mc')">☑️ Multiple Choice</button><button onclick="start('type')">⌨️ Tippen</button><button onclick="start('match')">🔗 Zuordnen</button></div>
+    <p class="mute">Falsche Wörter rutschen ins Fach 1 und kommen öfter dran. Richtige steigen bis Fach 5.</p>`;
+  }
+  if(L.end)return `<div class="card" style="text-align:center"><div class="big" style="cursor:default">${L.ok} von ${L.ok+L.ko} richtig</div><button class="p" onclick="go('learn')">Fertig</button> <button onclick="start('${L.mode}')">Nochmal</button></div>`;
+  return ({card:rCard,mc:rMc,type:rType,match:rMatch})[L.mode]();
+}
+function pool(){const a=+S.ff||0,b=+S.ft||0;return S.words.filter(w=>(!S.fb||w.b===S.fb)&&(!(a||b)||(w.p&&(w.pe||w.p)>=a&&w.p<=(b||99999))))}
+function start(mode){
+  const n=mode==='match'?6:10;
+  const items=[...pool()].sort((a,b)=>a.box-b.box+(Math.random()-.5)*1.6).slice(0,n);
+  L={mode,items,i:0,ok:0,ko:0,flip:false,fb:null};
+  if(mode==='match')setupMatch();
+  if(mode==='mc')setupMc();
+  render();
+}
+function mark(w,ok){w.box=ok?Math.min(5,w.box+1):1;ok?L.ok++:L.ko++;save()}
+function next(){L.i++;L.flip=false;L.fb=null;if(L.i>=L.items.length)L.end=true;else if(L.mode==='mc')setupMc();render()}
+const hd=()=>`<div class="mute" style="margin-bottom:8px">${Math.min(L.i+1,L.items.length)} / ${L.items.length} <button style="float:right;padding:2px 10px" onclick="go('learn')">Abbrechen</button></div>`;
+
+function rCard(){
+  const w=L.items[L.i];
+  return hd()+`<div class="card big" onclick="L.flip=true;render()">${esc(Q(w))}${L.flip?`<div style="color:var(--ok)">${esc(A(w))}</div>`:'<div class="mute" style="font:400 .9rem sans-serif">Tippen zum Umdrehen</div>'}</div>`+
+  (L.flip?`<div class="row"><button class="bad" onclick="mark(L.items[L.i],false);next()">Nochmal</button><button class="ok" onclick="mark(L.items[L.i],true);next()">Gewusst</button></div>`:'')+
+  `<button onclick="speak('${esc(w.f).replace(/'/g,"\\'")}')">🔊 Vorlesen</button>`;
+}
+function setupMc(){
+  const w=L.items[L.i];
+  const others=shuf(S.words.filter(x=>x.id!==w.id&&norm(A(x))!==norm(A(w)))).slice(0,3);
+  L.opts=shuf([w,...others]);
+}
+function rMc(){
+  const w=L.items[L.i];
+  return hd()+`<div class="card big" style="cursor:default">${esc(Q(w))}</div>`+
+  L.opts.map((o,i)=>`<button class="opt ${L.fb?(o.id===w.id?'right':(L.fb.pick===i?'wrong':'')):''}" ${L.fb?'disabled':''} onclick="pickMc(${i})">${esc(A(o))}</button>`).join('');
+}
+function pickMc(i){
+  const w=L.items[L.i],ok=L.opts[i].id===w.id;
+  mark(w,ok);L.fb={pick:i};render();setTimeout(next,ok?600:1400);
+}
+function rType(){
+  const w=L.items[L.i];
+  return hd()+`<div class="card big" style="cursor:default">${esc(Q(w))}</div>
+  <input id="ans" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Übersetzung eingeben" ${L.fb?'disabled':''} onkeydown="if(event.key==='Enter')L.fb?next():chk()">
+  ${L.fb?`<div class="fb" style="color:var(--${L.fb.ok?'ok':'bad'})">${L.fb.ok?'Richtig!':'Richtig wäre: '+esc(A(w))}</div><button class="p" onclick="next()">Weiter</button>`:`<br><br><button class="p" onclick="chk()">Prüfen</button>`}`;
+}
+function chk(){
+  const w=L.items[L.i],v=norm($('#ans').value);if(!v)return;
+  const alts=[norm(A(w)),...A(w).split(/[,;\/]/).map(norm)];
+  const ok=alts.includes(v);mark(w,ok);L.fb={ok};render();
+}
+function setupMatch(){L.l=shuf(L.items);L.r=shuf(L.items);L.sel=null;L.done=new Set();L.miss=new Set();L.flash=null}
+function rMatch(){
+  const cell=(w,side)=>`<button class="${L.sel&&L.sel.id===w.id&&L.sel.side===side?'sel':''} ${L.done.has(w.id)?'done':''} ${L.flash===side+w.id?'flash':''}" onclick="pm(${w.id},'${side}')">${esc(side==='l'?Q(w):A(w))}</button>`;
+  return `<div class="mute" style="margin-bottom:8px">Passende Paare verbinden <button style="float:right;padding:2px 10px" onclick="go('learn')">Abbrechen</button></div><div class="grid">`+
+  L.l.map((w,i)=>cell(w,'l')+cell(L.r[i],'r')).join('')+`</div>`;
+}
+function pm(id,side){
+  if(!L.sel||L.sel.side===side){L.sel={id,side};render();return}
+  const w=S.words.find(x=>x.id===id);
+  if(L.sel.id===id){
+    L.done.add(id);if(!L.miss.has(id))mark(w,true);
+  }else{
+    for(const x of [L.sel.id,id]){if(!L.miss.has(x)){L.miss.add(x);mark(S.words.find(y=>y.id===x),false)}}
+    L.flash=side+id;setTimeout(()=>{L.flash=null;render()},500);
+  }
+  L.sel=null;
+  if(L.done.size===L.items.length){L.end=true}
+  render();
+}
+render();
+</script>
+</body>
+</html>
